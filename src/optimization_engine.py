@@ -50,7 +50,8 @@ def run_stochastic_bess_optimization(n_scenarios=50, beta=0.5, max_power_mw=5.0,
         model += e_level[(s, 0)] == 0.5 * max_energy_mwh
         
         for t in hours:
-            model += e_level[(s, t+1)] == e_level[(s, t)] + (p_ch[(s, t)] * efficiency) - (p_dis[(s, t)] / efficiency)
+            # استفاده از ضرب در معکوس (1.0 / efficiency) به جای عملگر تقسیم برای جلوگیری از ارور
+            model += e_level[(s, t+1)] == e_level[(s, t)] + (p_ch[(s, t)] * efficiency) - (p_dis[(s, t)] * (1.0 / efficiency))
             model += u_ch[(s, t)] + u_dis[(s, t)] <= 1
             model += p_ch[(s, t)] <= max_power_mw * u_ch[(s, t)]
             model += p_dis[(s, t)] <= max_power_mw * u_dis[(s, t)]
