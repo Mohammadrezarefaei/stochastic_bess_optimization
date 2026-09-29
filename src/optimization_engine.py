@@ -1,85 +1,89 @@
-import numpy as np
-import pandas as pd
+import random
 import pulp
 
-def run_stochastic_bess_optimization(n_scenarios=100, beta=0.5):
+def run_stochastic_bess_optimization(n_scenarios=50, beta=0.5, max_power_mw=5.0, max_energy_mwh=10.0):
     """
-    اجرای مدل بهینه‌سازی تصادفی باتری تحت عدم قطعیت قیمت بازار آلمان با رویکرد CVaR
+    Runs a stochastic MILP optimization for a Battery Energy Storage System (BESS)
+    considering Day-Ahead market price uncertainty and CVaR risk aversion.
     """
-    np.random.seed(42)
-    n_hours = 24
+    hours = list(range(24))
+    scenarios = list(range(n_scenarios))
     
-    # الگوی پایه قیمت Day-Ahead بازار آلمان (24 ساعت)
-    base_prices = np.array([
-        45, 40, 38, 36, 40, 55,  # 00:00 - 05:00
-        75, 95, 90, 70, 45, 20,  # 06:00 - 11:00
-        15, 25, 60, 85, 110, 120,# 12:00 - 17:00
-        115, 95, 75, 60, 50, 48  # 18:00 - 23:00
-    ])
+    # تولید سناریوهای مصنوعی قیمت بر اساس الگوی معمول بازار آلمان
+    scenario_prices = {}
+    base_profile = [30, 25, 20, 18, 20, 28, 45, 65, 80, 60, 45, 40, 35, 35, 40, 50, 75, 95, 110, 85, 60, 50, 40, 32]
     
-    # تولید سناریوهای نوسانی
-    noise = np.random.normal(loc=1.0, scale=0.45, size=(n_scenarios, n_hours))
-    scenario_prices = base_prices * noise
-    scenario_prices = np.clip(scenario_prices, -50.0, 400.0)
+    for s in scenarios:
+        # اعمال نوسان تصادفی به سناریوها
+        scenario_prices[s] = [
+            max(5.0, p + random.gauss(0, 12) + (10 if 17 <= h <= 20 else 0))
+            for h, p in enumerate(base_profile)
+        ]
     
-    # مشخصات فیزیکی BESS
-    capacity_mwh = 4.0
-    max_power_mw = 2.0
-    eta_ch = 0.95
-    eta_dis = 0.95
-    soc_min = 0.1 * capacity_mwh
-    soc_max = 0.9 * capacity_mwh
-    initial_soc = 0.5 * capacity_mwh
-    alpha = 0.95
-    
-    hours = range(n_hours)
-    scenarios = range(n_scenarios)
-    
-    # تعریف مدل PuLP
-    prob = pulp.LpProblem("Stochastic_BESS_Arbitrage_CVaR", pulp.LpMaximize)
+    # راه‌اندازی مدل بهینه‌سازی PuLP
+    model = pulp.LpProblem("Stochastic_BESS_Optimization", pulp.LpMaximize)
     
     # متغیرهای تصمیم
+    # P_ch: توان شارژ، P_dis: توان دشارژ، E: سطح انرژی باتری
     p_ch = pulp.LpVariable.dicts("P_ch", ((s, t) for s in scenarios for t in hours), lowBound=0, upBound=max_power_mw)
     p_dis = pulp.LpVariable.dicts("P_dis", ((s, t) for s in scenarios for t in hours), lowBound=0, upBound=max_power_mw)
-    soc = pulp.LpVariable.dicts("SoC", ((s, t) for s in scenarios for t in hours), lowBound=soc_min, upBound=soc_max)
+    e_level = pulp.LpVariable.dicts("E", ((s, t) for s in scenarios for t in range(25)), lowBound=0, upBound=max_energy_mwh)
     
-    # متغیرهای ریسک CVaR
-    VaR = pulp.LpVariable("VaR", lowBound=None)
-    z = pulp.LpVariable.dicts("z", (s for s in scenarios), lowBound=0)
+    # متغیرهای باینری برای جلوگیری از شارژ و دشارژ همزمان
+    u_ch = pulp.LpVariable.dicts("u_ch", ((s, t) for s in scenarios for t in hours), cat='Binary')
+    u_dis = pulp.LpVariable.dicts("u_dis", ((s, t) for s in scenarios for t in hours), cat='Binary')
     
-    # سود انتظاری
+    # متغیرهای کمکی برای محاسبه ریسک (CVaR)
+    eta = pulp.LpVariable("VaR_eta", lowBound=None)
+    z = pulp.LpVariable.dicts("z_aux", (s for s in scenarios), lowBound=0)
+    
+    efficiency = 0.92
+    prob_s = 1.0 / n_scenarios
+    
+    # تابع هدف: حداکثرسازی سود انتظاری منهای جریمه ریسک (CVaR)
     expected_profit = pulp.lpSum(
-        (scenario_prices[s, t] * (p_dis[s, t] - p_ch[s, t])) 
+        prob_s * (scenario_prices[s][t] * (p_dis[s][t] - p_ch[s][t]))
         for s in scenarios for t in hours
-    ) / n_scenarios
+    )
     
-    # پنالتی ریسک
-    cvar_penalty = VaR + (1.0 / (1.0 - alpha)) * pulp.lpSum(z[s] for s in scenarios) / n_scenarios
+    cvar_penalty = beta * (eta + (1.0 / (0.05 * n_scenarios)) * pulp.lpSum(prob_s * z[s] for s in scenarios))
     
-    # تابع هدف
-    prob += expected_profit - beta * cvar_penalty
+    model += expected_profit - cvar_penalty, "Objective_Function"
     
-    # قیود CVaR
+    # محدودیت‌های سیستم
     for s in scenarios:
-        rev_s = pulp.lpSum(scenario_prices[s, t] * (p_dis[s, t] - p_ch[s, t]) for t in hours)
-        prob += -rev_s - VaR <= z[s]
+        # انرژی اولیه و نهایی باتری
+        model += e_level[s, 0] == 0.5 * max_energy_mwh
         
-    # قیود دینامیک باتری
-    for s in scenarios:
         for t in hours:
-            if t == 0:
-                prob += soc[s, t] == initial_soc + (eta_ch * p_ch[s, t] - (p_dis[s, t] / eta_dis)) * 1.0
-            else:
-                prob += soc[s, t] == soc[s, t-1] + (eta_ch * p_ch[s, t] - (p_dis[s, t] / eta_dis)) * 1.0
-                
-    # حل مدل
-    prob.solve(pulp.PULP_CBC_CMD(msg=0))
+            # تعادل انرژی در باتری
+            model += e_level[s, t+1] == e_level[s, t] + (p_ch[s][t] * efficiency - p_dis[s][t] / efficiency)
+            
+            # مهار شارژ و دشارژ همزمان با متغیر باینری
+            model += u_ch[s, t] + u_dis[s, t] <= 1
+            model += p_ch[s][t] <= max_power_mw * u_ch[s, t]
+            model += p_dis[s][t] <= max_power_mw * u_dis[s, t]
+            
+        # محدودیت‌های مربوط به محاسبه CVaR
+        profit_s = pulp.lpSum(scenario_prices[s][t] * (p_dis[s][t] - p_ch[s][t]) for t in hours)
+        model += z[s] >= -profit_s - eta
+        
+    # حل مدل با سالور پیش‌فرض PuLP
+    model.solve(pulp.PULP_CBC_CMD(msg=False))
     
-    cvar_val = VaR.value() + (1.0 / (1.0 - alpha)) * sum(z[s].value() for s in scenarios) / n_scenarios
+    status = pulp.LpStatus[model.status]
     
+        # استخراج نتایج
+    calculated_expected_profit = sum(
+        prob_s * sum(scenario_prices[s][t] * (p_dis[s][t].varValue - p_ch[s][t].varValue) for t in hours)
+        for s in scenarios
+    ) if status == "Optimal" else 0.0
+    
+    cvar_val = eta.varValue if status == "Optimal" else 0.0
+
     return {
-        "status": pulp.LpStatus[prob.status],
-        "expected_profit": expected_profit.value(),
+        "status": status,
+        "expected_profit": calculated_expected_profit,
         "cvar_risk": cvar_val,
         "scenario_prices": scenario_prices
     }
