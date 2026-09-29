@@ -32,7 +32,9 @@ def run_stochastic_bess_optimization(n_scenarios=50, beta=0.5, max_power_mw=5.0,
     u_dis = pulp.LpVariable.dicts("u_dis", idx_st, cat='Binary')
     
     z = pulp.LpVariable.dicts("z_aux", scenarios, lowBound=0, cat='Continuous')
-    eta = pulp.LpVariable("VaR_eta", cat='Continuous')
+    
+    # Bounding eta prevents unbounded status when Beta slider is set to 0.0
+    eta = pulp.LpVariable("VaR_eta", lowBound=-10000, upBound=10000, cat='Continuous')
     
     efficiency = 0.92
     prob_s = 1.0 / n_scenarios
@@ -42,7 +44,8 @@ def run_stochastic_bess_optimization(n_scenarios=50, beta=0.5, max_power_mw=5.0,
         for s in scenarios for t in hours
     ])
     
-    cvar_penalty = beta * (eta + (1.0 / (0.05 * n_scenarios)) * pulp.lpSum([prob_s * z[s] for s in scenarios]))
+    # Corrected CVaR math: removed n_scenarios from the denominator
+    cvar_penalty = beta * (eta + (1.0 / 0.05) * pulp.lpSum([prob_s * z[s] for s in scenarios]))
     
     model += expected_profit - cvar_penalty, "Objective_Function"
     
@@ -50,7 +53,6 @@ def run_stochastic_bess_optimization(n_scenarios=50, beta=0.5, max_power_mw=5.0,
         model += e_level[(s, 0)] == 0.5 * max_energy_mwh
         
         for t in hours:
-            # استفاده از ضرب در معکوس (1.0 / efficiency) به جای عملگر تقسیم برای جلوگیری از ارور
             model += e_level[(s, t+1)] == e_level[(s, t)] + (p_ch[(s, t)] * efficiency) - (p_dis[(s, t)] * (1.0 / efficiency))
             model += u_ch[(s, t)] + u_dis[(s, t)] <= 1
             model += p_ch[(s, t)] <= max_power_mw * u_ch[(s, t)]
