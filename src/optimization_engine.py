@@ -6,6 +6,12 @@ def run_stochastic_bess_optimization(n_scenarios=50, beta=0.5, max_power_mw=5.0,
     Runs a stochastic MILP optimization for a Battery Energy Storage System (BESS)
     considering Day-Ahead market price uncertainty and CVaR risk aversion.
     """
+    # اطمینان از صحت نوع داده‌ها برای جلوگیری از Type Error
+    n_scenarios = int(n_scenarios)
+    beta = float(beta)
+    max_power_mw = float(max_power_mw)
+    max_energy_mwh = float(max_energy_mwh)
+
     hours = list(range(24))
     scenarios = list(range(n_scenarios))
     
@@ -22,33 +28,27 @@ def run_stochastic_bess_optimization(n_scenarios=50, beta=0.5, max_power_mw=5.0,
     # راه‌اندازی مدل بهینه‌سازی PuLP
     model = pulp.LpProblem("Stochastic_BESS_Optimization", pulp.LpMaximize)
     
-    # تعریف متغیرها با استفاده از آرگومان‌های نام‌گذاری‌شده استاندارد و امن
-    p_ch = {}
-    p_dis = {}
-    e_level = {}
-    u_ch = {}
-    u_dis = {}
-    z = {}
-
-    for s in scenarios:
-        z[s] = pulp.LpVariable(f"z_aux_{s}", lowBound=0, cat='Continuous')
-        for t in hours:
-            p_ch[s, t] = pulp.LpVariable(f"P_ch_{s}_{t}", lowBound=0, upBound=max_power_mw, cat='Continuous')
-            p_dis[s, t] = pulp.LpVariable(f"P_dis_{s}_{t}", lowBound=0, upBound=max_power_mw, cat='Continuous')
-            u_ch[s, t] = pulp.LpVariable(f"u_ch_{s}_{t}", cat='Binary')
-            u_dis[s, t] = pulp.LpVariable(f"u_dis_{s}_{t}", cat='Binary')
-            
-        for t in range(25):
-            e_level[s, t] = pulp.LpVariable(f"E_{s}_{t}", lowBound=0, upBound=max_energy_mwh, cat='Continuous')
-
-    eta = pulp.LpVariable("VaR_eta", cat='Continuous')
+    # ساخت لیستِ ایندکس‌ها برای استفاده امن در متد dicts
+    idx_st = [(s, t) for s in scenarios for t in hours]
+    idx_e = [(s, t) for s in scenarios for t in range(25)]
+    
+    # تعریف متغیرها به صورت استاندارد و مقاوم در برابر خطا
+    p_ch = pulp.LpVariable.dicts("P_ch", idx_st, lowBound=0, upBound=max_power_mw)
+    p_dis = pulp.LpVariable.dicts("P_dis", idx_st, lowBound=0, upBound=max_power_mw)
+    e_level = pulp.LpVariable.dicts("E", idx_e, lowBound=0, upBound=max_energy_mwh)
+    
+    u_ch = pulp.LpVariable.dicts("u_ch", idx_st, cat=pulp.LpBinary)
+    u_dis = pulp.LpVariable.dicts("u_dis", idx_st, cat=pulp.LpBinary)
+    
+    z = pulp.LpVariable.dicts("z_aux", scenarios, lowBound=0)
+    eta = pulp.LpVariable("VaR_eta")
     
     efficiency = 0.92
     prob_s = 1.0 / n_scenarios
     
     # تابع هدف: حداکثرسازی سود انتظاری منهای جریمه ریسک (CVaR)
     expected_profit = pulp.lpSum(
-        prob_s * (scenario_prices[s][t] * (p_dis[s, t] - p_ch[s, t]))
+        prob_s * (scenario_prices[s][t] * (p_dis[(s, t)] - p_ch[(s, t)]))
         for s in scenarios for t in hours
     )
     
@@ -59,19 +59,19 @@ def run_stochastic_bess_optimization(n_scenarios=50, beta=0.5, max_power_mw=5.0,
     # محدودیت‌های سیستم
     for s in scenarios:
         # انرژی اولیه و نهایی باتری
-        model += e_level[s, 0] == 0.5 * max_energy_mwh
+        model += e_level[(s, 0)] == 0.5 * max_energy_mwh
         
         for t in hours:
             # تعادل انرژی در باتری
-            model += e_level[s, t+1] == e_level[s, t] + (p_ch[s, t] * efficiency - p_dis[s, t] / efficiency)
+            model += e_level[(s, t+1)] == e_level[(s, t)] + (p_ch[(s, t)] * efficiency - p_dis[(s, t)] / efficiency)
             
             # مهار شارژ و دشارژ همزمان با متغیر باینری
-            model += u_ch[s, t] + u_dis[s, t] <= 1
-            model += p_ch[s, t] <= max_power_mw * u_ch[s, t]
-            model += p_dis[s, t] <= max_power_mw * u_dis[s, t]
+            model += u_ch[(s, t)] + u_dis[(s, t)] <= 1
+            model += p_ch[(s, t)] <= max_power_mw * u_ch[(s, t)]
+            model += p_dis[(s, t)] <= max_power_mw * u_dis[(s, t)]
             
         # محدودیت‌های مربوط به محاسبه CVaR
-        profit_s = pulp.lpSum(scenario_prices[s][t] * (p_dis[s, t] - p_ch[s, t]) for t in hours)
+        profit_s = pulp.lpSum(scenario_prices[s][t] * (p_dis[(s, t)] - p_ch[(s, t)]) for t in hours)
         model += z[s] >= -profit_s - eta
         
     # حل مدل با سالور پیش‌فرض PuLP
@@ -79,17 +79,21 @@ def run_stochastic_bess_optimization(n_scenarios=50, beta=0.5, max_power_mw=5.0,
     
     status = pulp.LpStatus[model.status]
     
-    # استخراج نتایج
-    calculated_expected_profit = sum(
-        prob_s * sum(scenario_prices[s][t] * (p_dis[s, t].varValue - p_ch[s, t].varValue) for t in hours)
-        for s in scenarios
-    ) if status == "Optimal" else 0.0
+    # استخراج امن نتایج بدون خطای محاسبه
+    expected_prof_val = 0.0
+    cvar_val = 0.0
     
-    cvar_val = eta.varValue if status == "Optimal" else 0.0
+    if status == "Optimal":
+        expected_prof_val = sum(
+            prob_s * sum(scenario_prices[s][t] * (p_dis[(s, t)].varValue - p_ch[(s, t)].varValue) for t in hours)
+            for s in scenarios
+        )
+        # جلوگیری از Type Error در صورت تهی بودن مقدار متغیر
+        cvar_val = eta.varValue if eta.varValue is not None else 0.0
 
     return {
         "status": status,
-        "expected_profit": calculated_expected_profit,
+        "expected_profit": expected_prof_val,
         "cvar_risk": cvar_val,
         "scenario_prices": scenario_prices
     }
