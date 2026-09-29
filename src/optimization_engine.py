@@ -21,8 +21,6 @@ def run_stochastic_bess_optimization(n_scenarios=50, beta=0.5, max_power_mw=5.0,
     
     model = LpProblem("Stochastic_BESS_Optimization", LpMaximize)
     
-    # ساخت متغیرها به صورت دستی برای جلوگیری ۱۰۰٪ از ارور dicts در پایتون ۳.۱۴
-    # استفاده صریح از name=... برای جلوگیری از هرگونه TypeError
     p_ch = {}
     p_dis = {}
     u_ch = {}
@@ -30,18 +28,19 @@ def run_stochastic_bess_optimization(n_scenarios=50, beta=0.5, max_power_mw=5.0,
     e_level = {}
     z = {}
 
+    # برداشتن برچسب name= برای جلوگیری از TypeError
     for s in scenarios:
-        z[s] = LpVariable(name=f"z_aux_{s}", lowBound=0, cat="Continuous")
+        z[s] = LpVariable(f"z_aux_{s}", lowBound=0, cat="Continuous")
         for t in hours:
-            p_ch[(s, t)] = LpVariable(name=f"P_ch_{s}_{t}", lowBound=0, upBound=max_power_mw, cat="Continuous")
-            p_dis[(s, t)] = LpVariable(name=f"P_dis_{s}_{t}", lowBound=0, upBound=max_power_mw, cat="Continuous")
-            u_ch[(s, t)] = LpVariable(name=f"u_ch_{s}_{t}", cat="Binary")
-            u_dis[(s, t)] = LpVariable(name=f"u_dis_{s}_{t}", cat="Binary")
+            p_ch[(s, t)] = LpVariable(f"P_ch_{s}_{t}", lowBound=0, upBound=max_power_mw, cat="Continuous")
+            p_dis[(s, t)] = LpVariable(f"P_dis_{s}_{t}", lowBound=0, upBound=max_power_mw, cat="Continuous")
+            u_ch[(s, t)] = LpVariable(f"u_ch_{s}_{t}", cat="Binary")
+            u_dis[(s, t)] = LpVariable(f"u_dis_{s}_{t}", cat="Binary")
             
         for t in range(25):
-            e_level[(s, t)] = LpVariable(name=f"E_{s}_{t}", lowBound=0, upBound=max_energy_mwh, cat="Continuous")
+            e_level[(s, t)] = LpVariable(f"E_{s}_{t}", lowBound=0, upBound=max_energy_mwh, cat="Continuous")
 
-    eta = LpVariable(name="VaR_eta", cat="Continuous")
+    eta = LpVariable("VaR_eta", cat="Continuous")
     
     efficiency = 0.92
     prob_s = 1.0 / n_scenarios
@@ -69,7 +68,6 @@ def run_stochastic_bess_optimization(n_scenarios=50, beta=0.5, max_power_mw=5.0,
         
     model.solve()
     
-    # ساخت دیکشنری وضعیت به صورت محلی برای حذف کامل ارور ImportError مربوط به LpStatus
     status_map = {1: "Optimal", 0: "Not Solved", -1: "Infeasible", -2: "Unbounded", -3: "Undefined"}
     status_str = status_map.get(model.status, "Unknown")
     
