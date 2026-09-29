@@ -22,36 +22,26 @@ def run_stochastic_bess_optimization(n_scenarios=50, beta=0.5, max_power_mw=5.0,
     # راه‌اندازی مدل بهینه‌سازی PuLP
     model = pulp.LpProblem("Stochastic_BESS_Optimization", pulp.LpMaximize)
     
-    # استفاده از دیکشنری استاندارد پایتون برای جلوگیری از خطای AttributeError متغیرها
-    p_ch = {
-        (s, t): pulp.LpVariable(f"P_ch_{s}_{t}", lowBound=0, upBound=max_power_mw)
-        for s in scenarios for t in hours
-    }
-    p_dis = {
-        (s, t): pulp.LpVariable(f"P_dis_{s}_{t}", lowBound=0, upBound=max_power_mw)
-        for s in scenarios for t in hours
-    }
-    e_level = {
-        (s, t): pulp.LpVariable(f"E_{s}_{t}", lowBound=0, upBound=max_energy_mwh)
-        for s in scenarios for t in range(25)
-    }
-    
-    # متغیرهای باینری
-    u_ch = {
-        (s, t): pulp.LpVariable(f"u_ch_{s}_{t}", cat='Binary')
-        for s in scenarios for t in hours
-    }
-    u_dis = {
-        (s, t): pulp.LpVariable(f"u_dis_{s}_{t}", cat='Binary')
-        for s in scenarios for t in hours
-    }
-    
-    # متغیرهای کمکی برای محاسبه ریسک (CVaR)
+    # تعریف متغیرها بدون خطای نوع (Type Error) با ساختار امن
+    p_ch = {}
+    p_dis = {}
+    e_level = {}
+    u_ch = {}
+    u_dis = {}
+    z = {}
+
+    for s in scenarios:
+        z[s] = pulp.LpVariable(f"z_aux_{s}", lowBound=0)
+        for t in hours:
+            p_ch[s, t] = pulp.LpVariable(f"P_ch_{s}_{t}", 0, max_power_mw)
+            p_dis[s, t] = pulp.LpVariable(f"P_dis_{s}_{t}", 0, max_power_mw)
+            u_ch[s, t] = pulp.LpVariable(f"u_ch_{s}_{t}", cat='Binary')
+            u_dis[s, t] = pulp.LpVariable(f"u_dis_{s}_{t}", cat='Binary')
+            
+        for t in range(25):
+            e_level[s, t] = pulp.LpVariable(f"E_{s}_{t}", 0, max_energy_mwh)
+
     eta = pulp.LpVariable("VaR_eta", lowBound=None)
-    z = {
-        s: pulp.LpVariable(f"z_aux_{s}", lowBound=0)
-        for s in scenarios
-    }
     
     efficiency = 0.92
     prob_s = 1.0 / n_scenarios
