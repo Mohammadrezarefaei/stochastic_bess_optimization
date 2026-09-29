@@ -28,19 +28,47 @@ def run_stochastic_bess_optimization(n_scenarios=50, beta=0.5, max_power_mw=5.0,
     e_level = {}
     z = {}
 
-    # برداشتن برچسب name= برای جلوگیری از TypeError
+    # دور زدن کامل باگ‌های __init__ با تزریق مستقیم ویژگی‌ها (Attributes)
     for s in scenarios:
-        z[s] = LpVariable(f"z_aux_{s}", lowBound=0, cat="Continuous")
+        var_z = LpVariable(f"z_aux_{s}")
+        var_z.lowBound = 0
+        var_z.cat = "Continuous"
+        z[s] = var_z
+
         for t in hours:
-            p_ch[(s, t)] = LpVariable(f"P_ch_{s}_{t}", lowBound=0, upBound=max_power_mw, cat="Continuous")
-            p_dis[(s, t)] = LpVariable(f"P_dis_{s}_{t}", lowBound=0, upBound=max_power_mw, cat="Continuous")
-            u_ch[(s, t)] = LpVariable(f"u_ch_{s}_{t}", cat="Binary")
-            u_dis[(s, t)] = LpVariable(f"u_dis_{s}_{t}", cat="Binary")
+            # P_ch
+            v_pch = LpVariable(f"P_ch_{s}_{t}")
+            v_pch.lowBound = 0
+            v_pch.upBound = max_power_mw
+            v_pch.cat = "Continuous"
+            p_ch[(s, t)] = v_pch
+            
+            # P_dis
+            v_pdis = LpVariable(f"P_dis_{s}_{t}")
+            v_pdis.lowBound = 0
+            v_pdis.upBound = max_power_mw
+            v_pdis.cat = "Continuous"
+            p_dis[(s, t)] = v_pdis
+            
+            # u_ch
+            v_uch = LpVariable(f"u_ch_{s}_{t}")
+            v_uch.cat = "Binary"
+            u_ch[(s, t)] = v_uch
+            
+            # u_dis
+            v_udis = LpVariable(f"u_dis_{s}_{t}")
+            v_udis.cat = "Binary"
+            u_dis[(s, t)] = v_udis
             
         for t in range(25):
-            e_level[(s, t)] = LpVariable(f"E_{s}_{t}", lowBound=0, upBound=max_energy_mwh, cat="Continuous")
+            v_e = LpVariable(f"E_{s}_{t}")
+            v_e.lowBound = 0
+            v_e.upBound = max_energy_mwh
+            v_e.cat = "Continuous"
+            e_level[(s, t)] = v_e
 
-    eta = LpVariable("VaR_eta", cat="Continuous")
+    eta = LpVariable("VaR_eta")
+    eta.cat = "Continuous"
     
     efficiency = 0.92
     prob_s = 1.0 / n_scenarios
