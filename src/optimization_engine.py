@@ -22,7 +22,7 @@ def run_stochastic_bess_optimization(n_scenarios=50, beta=0.5, max_power_mw=5.0,
     # راه‌اندازی مدل بهینه‌سازی PuLP
     model = pulp.LpProblem("Stochastic_BESS_Optimization", pulp.LpMaximize)
     
-    # تعریف متغیرها بدون خطای نوع (Type Error) با ساختار امن
+    # تعریف ایمن متغیرها با استفاده از مقداردهی ترتیبی برای جلوگیری از خطای TypeError
     p_ch = {}
     p_dis = {}
     e_level = {}
@@ -31,17 +31,18 @@ def run_stochastic_bess_optimization(n_scenarios=50, beta=0.5, max_power_mw=5.0,
     z = {}
 
     for s in scenarios:
-        z[s] = pulp.LpVariable(f"z_aux_{s}", lowBound=0)
+        # ساختار: LpVariable(name, lowBound, upBound, cat)
+        z[s] = pulp.LpVariable(f"z_aux_{s}", 0, None, pulp.LpContinuous)
         for t in hours:
-            p_ch[s, t] = pulp.LpVariable(f"P_ch_{s}_{t}", 0, max_power_mw)
-            p_dis[s, t] = pulp.LpVariable(f"P_dis_{s}_{t}", 0, max_power_mw)
+            p_ch[s, t] = pulp.LpVariable(f"P_ch_{s}_{t}", 0, max_power_mw, pulp.LpContinuous)
+            p_dis[s, t] = pulp.LpVariable(f"P_dis_{s}_{t}", 0, max_power_mw, pulp.LpContinuous)
             u_ch[s, t] = pulp.LpVariable(f"u_ch_{s}_{t}", cat='Binary')
             u_dis[s, t] = pulp.LpVariable(f"u_dis_{s}_{t}", cat='Binary')
             
         for t in range(25):
-            e_level[s, t] = pulp.LpVariable(f"E_{s}_{t}", 0, max_energy_mwh)
+            e_level[s, t] = pulp.LpVariable(f"E_{s}_{t}", 0, max_energy_mwh, pulp.LpContinuous)
 
-    eta = pulp.LpVariable("VaR_eta", lowBound=None)
+    eta = pulp.LpVariable("VaR_eta", None, None, pulp.LpContinuous)
     
     efficiency = 0.92
     prob_s = 1.0 / n_scenarios
