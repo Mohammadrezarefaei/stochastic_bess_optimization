@@ -1,5 +1,6 @@
 import random
-from pulp import LpProblem, LpMaximize, LpVariable, lpSum, LpStatus
+import pulp
+from pulp import LpProblem, LpMaximize, LpVariable, lpSum
 
 def run_stochastic_bess_optimization(n_scenarios=50, beta=0.5, max_power_mw=5.0, max_energy_mwh=10.0):
     n_scenarios = int(n_scenarios)
@@ -58,10 +59,10 @@ def run_stochastic_bess_optimization(n_scenarios=50, beta=0.5, max_power_mw=5.0,
         profit_s = lpSum([scenario_prices[s][t] * (p_dis[(s, t)] - p_ch[(s, t)]) for t in hours])
         model += z[s] >= -profit_s - eta
         
-    # استفاده از سالور پیش‌فرض بدون نیاز به ایمپورت اضافی
     model.solve()
     
-    status = LpStatus[model.status]
+    # استفاده از pulp.LpStatus برای جلوگیری از ارور ایمپورت
+    status = pulp.LpStatus[model.status]
     
     expected_prof_val = 0.0
     cvar_val = 0.0
