@@ -1,5 +1,5 @@
 import random
-import pulp
+from pulp import LpProblem, LpMaximize, LpVariable, lpSum, PULP_CBC_CMD, LpStatus
 
 def run_stochastic_bess_optimization(n_scenarios=50, beta=0.5, max_power_mw=5.0, max_energy_mwh=10.0):
     n_scenarios = int(n_scenarios)
@@ -19,30 +19,31 @@ def run_stochastic_bess_optimization(n_scenarios=50, beta=0.5, max_power_mw=5.0,
             for h, p in enumerate(base_profile)
         ]
     
-    model = pulp.LpProblem("Stochastic_BESS_Optimization", pulp.LpMaximize)
+    model = LpProblem("Stochastic_BESS_Optimization", LpMaximize)
     
     idx_st = [(s, t) for s in scenarios for t in hours]
     idx_e = [(s, t) for s in scenarios for t in range(25)]
     
-    p_ch = pulp.LpVariable.dicts("P_ch", idx_st, lowBound=0, upBound=max_power_mw, cat='Continuous')
-    p_dis = pulp.LpVariable.dicts("P_dis", idx_st, lowBound=0, upBound=max_power_mw, cat='Continuous')
-    e_level = pulp.LpVariable.dicts("E", idx_e, lowBound=0, upBound=max_energy_mwh, cat='Continuous')
+    # استفاده مستقیم از کلاس‌ها بدون پیشوند .pulp
+    p_ch = LpVariable.dicts("P_ch", idx_st, lowBound=0, upBound=max_power_mw)
+    p_dis = LpVariable.dicts("P_dis", idx_st, lowBound=0, upBound=max_power_mw)
+    e_level = LpVariable.dicts("E", idx_e, lowBound=0, upBound=max_energy_mwh)
     
-    u_ch = pulp.LpVariable.dicts("u_ch", idx_st, cat='Binary')
-    u_dis = pulp.LpVariable.dicts("u_dis", idx_st, cat='Binary')
+    u_ch = LpVariable.dicts("u_ch", idx_st, cat='Binary')
+    u_dis = LpVariable.dicts("u_dis", idx_st, cat='Binary')
     
-    z = pulp.LpVariable.dicts("z_aux", scenarios, lowBound=0, cat='Continuous')
-    eta = pulp.LpVariable("VaR_eta", cat='Continuous')
+    z = LpVariable.dicts("z_aux", scenarios, lowBound=0)
+    eta = LpVariable("VaR_eta")
     
     efficiency = 0.92
     prob_s = 1.0 / n_scenarios
     
-    expected_profit = pulp.lpSum([
+    expected_profit = lpSum([
         prob_s * (scenario_prices[s][t] * (p_dis[(s, t)] - p_ch[(s, t)]))
         for s in scenarios for t in hours
     ])
     
-    cvar_penalty = beta * (eta + (1.0 / (0.05 * n_scenarios)) * pulp.lpSum([prob_s * z[s] for s in scenarios]))
+    cvar_penalty = beta * (eta + (1.0 / (0.05 * n_scenarios)) * lpSum([prob_s * z[s] for s in scenarios]))
     
     model += expected_profit - cvar_penalty, "Objective_Function"
     
@@ -55,12 +56,12 @@ def run_stochastic_bess_optimization(n_scenarios=50, beta=0.5, max_power_mw=5.0,
             model += p_ch[(s, t)] <= max_power_mw * u_ch[(s, t)]
             model += p_dis[(s, t)] <= max_power_mw * u_dis[(s, t)]
             
-        profit_s = pulp.lpSum([scenario_prices[s][t] * (p_dis[(s, t)] - p_ch[(s, t)]) for t in hours])
+        profit_s = lpSum([scenario_prices[s][t] * (p_dis[(s, t)] - p_ch[(s, t)]) for t in hours])
         model += z[s] >= -profit_s - eta
         
-    model.solve(pulp.PULP_CBC_CMD(msg=False))
+    model.solve(PULP_CBC_CMD(msg=False))
     
-    status = pulp.LpStatus[model.status]
+    status = LpStatus[model.status]
     
     expected_prof_val = 0.0
     cvar_val = 0.0
