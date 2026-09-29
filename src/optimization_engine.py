@@ -1,5 +1,5 @@
 import random
-from pulp import LpProblem, LpMaximize, LpVariable, lpSum, PULP_CBC_CMD, LpStatus
+from pulp import LpProblem, LpMaximize, LpVariable, lpSum, LpStatus
 
 def run_stochastic_bess_optimization(n_scenarios=50, beta=0.5, max_power_mw=5.0, max_energy_mwh=10.0):
     n_scenarios = int(n_scenarios)
@@ -24,7 +24,6 @@ def run_stochastic_bess_optimization(n_scenarios=50, beta=0.5, max_power_mw=5.0,
     idx_st = [(s, t) for s in scenarios for t in hours]
     idx_e = [(s, t) for s in scenarios for t in range(25)]
     
-    # استفاده مستقیم از کلاس‌ها بدون پیشوند .pulp
     p_ch = LpVariable.dicts("P_ch", idx_st, lowBound=0, upBound=max_power_mw)
     p_dis = LpVariable.dicts("P_dis", idx_st, lowBound=0, upBound=max_power_mw)
     e_level = LpVariable.dicts("E", idx_e, lowBound=0, upBound=max_energy_mwh)
@@ -59,7 +58,8 @@ def run_stochastic_bess_optimization(n_scenarios=50, beta=0.5, max_power_mw=5.0,
         profit_s = lpSum([scenario_prices[s][t] * (p_dis[(s, t)] - p_ch[(s, t)]) for t in hours])
         model += z[s] >= -profit_s - eta
         
-    model.solve(PULP_CBC_CMD(msg=False))
+    # استفاده از سالور پیش‌فرض بدون نیاز به ایمپورت اضافی
+    model.solve()
     
     status = LpStatus[model.status]
     
