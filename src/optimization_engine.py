@@ -1,5 +1,4 @@
 import random
-import pulp
 from pulp import LpProblem, LpMaximize, LpVariable, lpSum
 
 def run_stochastic_bess_optimization(n_scenarios=50, beta=0.5, max_power_mw=5.0, max_energy_mwh=10.0):
@@ -22,18 +21,27 @@ def run_stochastic_bess_optimization(n_scenarios=50, beta=0.5, max_power_mw=5.0,
     
     model = LpProblem("Stochastic_BESS_Optimization", LpMaximize)
     
-    idx_st = [(s, t) for s in scenarios for t in hours]
-    idx_e = [(s, t) for s in scenarios for t in range(25)]
-    
-    p_ch = LpVariable.dicts("P_ch", idx_st, lowBound=0, upBound=max_power_mw)
-    p_dis = LpVariable.dicts("P_dis", idx_st, lowBound=0, upBound=max_power_mw)
-    e_level = LpVariable.dicts("E", idx_e, lowBound=0, upBound=max_energy_mwh)
-    
-    u_ch = LpVariable.dicts("u_ch", idx_st, cat='Binary')
-    u_dis = LpVariable.dicts("u_dis", idx_st, cat='Binary')
-    
-    z = LpVariable.dicts("z_aux", scenarios, lowBound=0)
-    eta = LpVariable("VaR_eta")
+    # ساخت متغیرها به صورت دستی برای جلوگیری ۱۰۰٪ از ارور dicts در پایتون ۳.۱۴
+    # استفاده صریح از name=... برای جلوگیری از هرگونه TypeError
+    p_ch = {}
+    p_dis = {}
+    u_ch = {}
+    u_dis = {}
+    e_level = {}
+    z = {}
+
+    for s in scenarios:
+        z[s] = LpVariable(name=f"z_aux_{s}", lowBound=0, cat="Continuous")
+        for t in hours:
+            p_ch[(s, t)] = LpVariable(name=f"P_ch_{s}_{t}", lowBound=0, upBound=max_power_mw, cat="Continuous")
+            p_dis[(s, t)] = LpVariable(name=f"P_dis_{s}_{t}", lowBound=0, upBound=max_power_mw, cat="Continuous")
+            u_ch[(s, t)] = LpVariable(name=f"u_ch_{s}_{t}", cat="Binary")
+            u_dis[(s, t)] = LpVariable(name=f"u_dis_{s}_{t}", cat="Binary")
+            
+        for t in range(25):
+            e_level[(s, t)] = LpVariable(name=f"E_{s}_{t}", lowBound=0, upBound=max_energy_mwh, cat="Continuous")
+
+    eta = LpVariable(name="VaR_eta", cat="Continuous")
     
     efficiency = 0.92
     prob_s = 1.0 / n_scenarios
@@ -61,13 +69,14 @@ def run_stochastic_bess_optimization(n_scenarios=50, beta=0.5, max_power_mw=5.0,
         
     model.solve()
     
-    # استفاده از pulp.LpStatus برای جلوگیری از ارور ایمپورت
-    status = pulp.LpStatus[model.status]
+    # ساخت دیکشنری وضعیت به صورت محلی برای حذف کامل ارور ImportError مربوط به LpStatus
+    status_map = {1: "Optimal", 0: "Not Solved", -1: "Infeasible", -2: "Unbounded", -3: "Undefined"}
+    status_str = status_map.get(model.status, "Unknown")
     
     expected_prof_val = 0.0
     cvar_val = 0.0
     
-    if status == "Optimal":
+    if status_str == "Optimal":
         expected_prof_val = sum(
             prob_s * sum(scenario_prices[s][t] * (p_dis[(s, t)].varValue - p_ch[(s, t)].varValue) for t in hours)
             for s in scenarios
@@ -75,7 +84,7 @@ def run_stochastic_bess_optimization(n_scenarios=50, beta=0.5, max_power_mw=5.0,
         cvar_val = getattr(eta, 'varValue', 0.0) if getattr(eta, 'varValue', None) is not None else 0.0
 
     return {
-        "status": status,
+        "status": status_str,
         "expected_profit": expected_prof_val,
         "cvar_risk": cvar_val,
         "scenario_prices": scenario_prices
